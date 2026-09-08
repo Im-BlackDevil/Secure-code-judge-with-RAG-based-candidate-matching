@@ -1,13 +1,15 @@
-const express = require('express');
-const fs = require('fs');
-const { execSync } = require('child_process');
-const pool = require('../db/pool');
-const requireAuth = require('../middleware/auth');
+import express, { Request, Response } from 'express';
+import fs from 'fs';
+import { execSync } from 'child_process';
+import pool from '../db/pool';
+import requireAuth from '../middleware/auth';
+import { Submission, TestCase } from '../types';
+
 const router = express.Router();
 
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, async (req: Request, res: Response) => {
   const { problem_id, code } = req.body;
-  const testCases = await pool.query('SELECT * FROM test_cases WHERE problem_id=$1', [problem_id]);
+  const testCases = await pool.query<TestCase>('SELECT * FROM test_cases WHERE problem_id=$1', [problem_id]);
 
   fs.writeFileSync('temp_solution.py', code);
 
@@ -27,11 +29,11 @@ router.post('/', requireAuth, async (req, res) => {
 
   fs.unlinkSync('temp_solution.py');
 
-  const result = await pool.query(
+  const result = await pool.query<Submission>(
     'INSERT INTO submissions (student_id, problem_id, code, status) VALUES ($1,$2,$3,$4) RETURNING *',
-    [req.user.id, problem_id, code, status]
+    [req.user!.id, problem_id, code, status]
   );
   res.status(201).json(result.rows[0]);
 });
 
-module.exports = router;
+export default router;
