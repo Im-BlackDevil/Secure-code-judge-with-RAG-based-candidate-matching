@@ -1,39 +1,33 @@
 import express, { Request, Response } from 'express';
-import fs from 'fs';
-import { execSync } from 'child_process';
 import pool from '../db/pool';
 import requireAuth from '../middleware/auth';
-import { Submission, TestCase } from '../types';
+import { submissionQueue } from '../queues/submissionQueue';
+import { Submission } from '../types';
 
 const router = express.Router();
 
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   const { problem_id, code } = req.body;
-  const testCases = await pool.query<TestCase>('SELECT * FROM test_cases WHERE problem_id=$1', [problem_id]);
-
-  fs.writeFileSync('temp_solution.py', code);
-
-  let status = 'Accepted';
-  for (const test of testCases.rows) {
-    try {
-      const output = execSync('python temp_solution.py', { input: test.input, timeout: 5000 }).toString().trim();
-      if (output !== test.expected_output.trim()) {
-        status = 'Wrong Answer';
-        break;
-      }
-    } catch (err) {
-      status = 'Runtime Error';
-      break;
-    }
-  }
-
-  fs.unlinkSync('temp_solution.py');
 
   const result = await pool.query<Submission>(
     'INSERT INTO submissions (student_id, problem_id, code, status) VALUES ($1,$2,$3,$4) RETURNING *',
-    [req.user!.id, problem_id, code, status]
+    [req.user!.id, problem_id, code, 'pending']
   );
-  res.status(201).json(result.rows[0]);
+  const submission = result.rows[0];
+
+  await submissionQueue.add('run-submission', {
+    submissionId: submission.id,
+    problemId: problem_id,
+    code
+  });
+
+  res.status(202).json(submission);
+});
+
+router.get('/:id', requireAuth, async (req: Request, res: Response) => {
+  const result = await pool.query<Submission>('SELECT * FROM submissions WHERE id=$1', [req.params.id]);
+  if (!result.rows[0]) return res.status(404).json({ error: 'Submission not found' });
+  res.json(result.rows[0]);
 });
 
 export default router;
