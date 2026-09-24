@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "worker": "ts-node-dev --respawn --transpile-only src/workers/executionWorker.ts"
   },
   "keywords": [],
   "author": "",
