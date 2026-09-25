@@ -1,0 +1,4 @@
+﻿{
+  "problem_id": 1,
+  "code": "a,b=map(int,input().split())\nprint(a+b+1)"
+}
