@@ -38,3 +38,16 @@ export interface ResumeProfile {
   raw_text: string;
   created_at: Date;
 }
+
+export interface ResumeEntity {
+  id: number;
+  resume_id: number;
+  entity_type: 'skill' | 'project' | 'experience';
+  text: string;
+}
+
+export interface ParsedResume {
+  skills: string[];
+  projects: string[];
+  experience: string[];
+}
