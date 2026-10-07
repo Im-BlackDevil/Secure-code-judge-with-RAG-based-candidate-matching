@@ -18,7 +18,17 @@ router.post('/', requireAuth, upload.single('resume'), async (req: Request, res:
     [req.user!.id, data.text, 'pending']
   );
 
-  await resumeQueue.add('process-resume', { resumeId: result.rows[0].id });
+  await resumeQueue.add(
+    'process-resume',
+    { resumeId: result.rows[0].id },
+    {
+        attempts: 4,
+        backoff: {
+            type: 'exponential',
+            delay: 5000
+        }
+    }
+  );
   res.status(202).json(result.rows[0]);
 });
 

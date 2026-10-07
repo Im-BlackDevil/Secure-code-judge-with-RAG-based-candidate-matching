@@ -29,7 +29,12 @@ const worker = new Worker<ResumeJobData>('resume-processing', async (job: Job<Re
   }
 }, { connection });
 
-worker.on('completed', (job) => console.log(`Resume ${job.id} processed`));
-worker.on('failed', (job, err) => console.error(`Resume job ${job?.id} failed:`, err));
+worker.on('completed', (job) => console.log(`Resume ${job.data.resumeId} processed`));
+worker.on('failed', async (job, err) => {
+  console.error(`Resume ${job?.data.resumeId} failed (attempt ${job?.attemptsMade}):`, err.message);
+  if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+    await pool.query('UPDATE resume_profiles SET status=$1 WHERE id=$2', ['failed', job.data.resumeId]);
+  }
+});
 
 console.log('Resume worker is listening for jobs...');

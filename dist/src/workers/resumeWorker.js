@@ -24,6 +24,11 @@ const worker = new bullmq_1.Worker('resume-processing', async (job) => {
         await pool_1.default.query('INSERT INTO resume_entities (resume_id, entity_type, text, embedding) VALUES ($1,$2,$3,$4)', [resumeId, entity.type, entity.text, (0, embeddings_1.toVectorLiteral)(vector)]);
     }
 }, { connection: connection_1.default });
-worker.on('completed', (job) => console.log(`Resume ${job.id} processed`));
-worker.on('failed', (job, err) => console.error(`Resume job ${job?.id} failed:`, err));
+worker.on('completed', (job) => console.log(`Resume ${job.data.resumeId} processed`));
+worker.on('failed', async (job, err) => {
+    console.error(`Resume ${job?.data.resumeId} failed (attempt ${job?.attemptsMade}):`, err.message);
+    if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+        await pool_1.default.query('UPDATE resume_profiles SET status=$1 WHERE id=$2', ['failed', job.data.resumeId]);
+    }
+});
 console.log('Resume worker is listening for jobs...');
