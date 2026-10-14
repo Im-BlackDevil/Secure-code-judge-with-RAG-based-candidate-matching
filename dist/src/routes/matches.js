@@ -7,7 +7,7 @@ const express_1 = __importDefault(require("express"));
 const pool_1 = __importDefault(require("../db/pool"));
 const auth_1 = __importDefault(require("../middleware/auth"));
 const embeddings_1 = require("../services/embeddings");
-const gemini_1 = __importDefault(require("../services/gemini"));
+const llm_1 = require("../services/llm");
 const router = express_1.default.Router();
 router.get('/:jobId', auth_1.default, async (req, res) => {
     if (req.user?.role !== 'recruiter')
@@ -36,8 +36,21 @@ A candidate's resume has these matching highlights:
 ${context}
 
 In 1-2 sentences, explain why this candidate is a good match, citing specific overlaps. Be concise and factual.`;
-        const explanation = await gemini_1.default.models.generateContent({ model: 'gemini-3.8-flash', contents: prompt });
-        results.push({ resumeId, explanation: explanation.text, topMatches: matchedEntities });
+        let explanation = null;
+        try {
+            explanation = await (0, llm_1.generateWithRetry)(prompt);
+        }
+        catch (err) {
+            console.error(`Could not generate explanation for resume ${resumeId}:`, err);
+            // Keep the retrieved results if Gemini is unavailable.
+            explanation = null;
+        }
+        results.push({
+            resumeId,
+            explanation,
+            explanationAvailable: explanation !== null,
+            topMatches: matchedEntities
+        });
     }
     res.json(results);
 });

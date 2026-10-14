@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -20,6 +20,11 @@ app.use('/jobs', jobsRoutes);
 app.use('/submissions', submissionsRoutes);
 app.use('/resumes', resumesRoutes);
 app.use('/matches', matchesRoutes);
+
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
