@@ -30,6 +30,7 @@ export interface Submission {
   code: string;
   status: string;
   created_at: Date;
+  execution_ms: number | null;
 }
 
 export interface ResumeProfile {
