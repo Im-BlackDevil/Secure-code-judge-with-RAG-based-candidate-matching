@@ -28,11 +28,28 @@ app.use('/submissions', submissionsRoutes);
 app.use('/resumes', resumesRoutes);
 app.use('/matches', matchesRoutes);
 
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((
+  err: Error & { status?: number },
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   if (err instanceof multer.MulterError) {
     res.status(400).json({ error: err.message });
     return;
   }
+
+  // Return expected client errors using their assigned status.
+  if (
+    typeof err.status === 'number' &&
+    err.status >= 400 &&
+    err.status < 500
+  ) {
+    res.status(err.status).json({ error: err.message });
+    return;
+  }
+
+  // Unexpected/internal errors must remain generic to clients.
   logger.error({ err }, 'unhandled error');
   res.status(500).json({ error: 'Internal server error' });
 });
