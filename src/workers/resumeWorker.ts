@@ -3,6 +3,7 @@ import connection from '../queues/connection';
 import pool from '../db/pool';
 import { extractResumeData } from '../services/resumeExtraction';
 import { embedText, toVectorLiteral } from '../services/embeddings';
+import { logger } from '../logger';
 
 interface ResumeJobData { resumeId: number; }
 
@@ -31,10 +32,41 @@ const worker = new Worker<ResumeJobData>('resume-processing', async (job: Job<Re
 
 worker.on('completed', (job) => console.log(`Resume ${job.data.resumeId} processed`));
 worker.on('failed', async (job, err) => {
-  console.error(`Resume ${job?.data.resumeId} failed (attempt ${job?.attemptsMade}):`, err.message);
-  if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
-    await pool.query('UPDATE resume_profiles SET status=$1 WHERE id=$2', ['failed', job.data.resumeId]);
+  if (!job) return;
+
+  const final =
+    job.attemptsMade >= (job.opts.attempts ?? 1) ||
+    /stalled/i.test(err.message);
+
+  logger.error({
+    event: 'resume_job_failed',
+    resumeId: job.data.resumeId,
+    attempt: job.attemptsMade,
+    final,
+    error: err.message,
+  });
+
+  if (final) {
+    await pool.query(
+      'UPDATE resume_profiles SET status = $1 WHERE id = $2',
+      ['failed', job.data.resumeId]
+    );
   }
 });
 
+worker.on('error', err =>
+  logger.error({ err }, 'resume worker error')
+);
 console.log('Resume worker is listening for jobs...');
+
+async function shutdown(signal: string) {
+  logger.info({ event: 'shutdown', signal });
+
+  await worker.close();
+  await pool.end();
+
+  process.exit(0);
+}
+
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
