@@ -1,67 +1,31 @@
 import express, { Request, Response } from 'express';
 import pool from '../db/pool';
 import requireAuth from '../middleware/auth';
-import { embedText, toVectorLiteral } from '../services/embeddings';
+import { rankResumesForJob, requirementsForJob } from '../services/matching';
+import { RankedCandidate } from '../services/ranking';
 import { generateWithRetry } from '../services/llm';
+import { logger } from '../logger';
 
 const router = express.Router();
-
-interface RequirementMatch {
-  requirement: string;
-  matchedText: string;
-  matchedType: string;
-  similarity: number;
-}
+const TOP_N = 5;
+const EXPLAIN_CONCURRENCY = Number(process.env.EXPLAIN_CONCURRENCY ?? 2);
 
 router.get('/:jobId', requireAuth, async (req: Request, res: Response) => {
-  if (req.user?.role !== 'recruiter') {
-    return res.status(403).json({ error: 'Only recruiters can view matches' });
-  }
+  if (req.user!.role !== 'recruiter') return res.status(403).json({ error: 'Only recruiters can view matches' });
 
-  const jobResult = await pool.query('SELECT * FROM jobs WHERE id=$1', [req.params.jobId]);
+  const jobId = Number(req.params.jobId);
+  if (!Number.isInteger(jobId)) return res.status(400).json({ error: 'Invalid job id' });
+
+  const jobResult = await pool.query('SELECT * FROM jobs WHERE id=$1', [jobId]);
   const job = jobResult.rows[0];
-  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (!job || job.recruiter_id !== req.user!.id) return res.status(404).json({ error: 'Job not found' });
 
-  const requirements: string[] =
-    job.required_skills && job.required_skills.length > 0
-      ? job.required_skills
-      : [`${job.title}. ${job.description}`];
+  const t0 = Date.now();
+  const ranked = await rankResumesForJob(job);
+  const retrievalMs = Date.now() - t0;
+  const requirements = requirementsForJob(job);
 
-  // For each requirement, the single closest entity in every resume
-  const perResume = new Map<number, RequirementMatch[]>();
-
-  for (const requirement of requirements) {
-    const vector = await embedText(requirement);
-    const rows = await pool.query(
-      `SELECT DISTINCT ON (resume_id)
-              resume_id, text, entity_type, 1 - (embedding <=> $1) AS similarity
-       FROM resume_entities
-       ORDER BY resume_id, embedding <=> $1`,
-      [toVectorLiteral(vector)]
-    );
-    for (const row of rows.rows) {
-      if (!perResume.has(row.resume_id)) perResume.set(row.resume_id, []);
-      perResume.get(row.resume_id)!.push({
-        requirement,
-        matchedText: row.text,
-        matchedType: row.entity_type,
-        similarity: Number(row.similarity)
-      });
-    }
-  }
-
-  const ranked = [...perResume.entries()]
-    .map(([resumeId, matches]) => ({
-      resumeId,
-      score: matches.reduce((sum, m) => sum + m.similarity, 0) / requirements.length,
-      matches
-    }))
-    .sort((a, b) => b.score - a.score);
-
-  const TOP_N = 5; // only explain the best candidates
-  const results = [];
-
-  for (const candidate of ranked.slice(0, TOP_N)) {
+  const explain = async (candidate: RankedCandidate) => {
     const evidence = candidate.matches
       .map(m => `- Requirement "${m.requirement}": closest evidence is (${m.matchedType}) ${m.matchedText}`)
       .join('\n');
@@ -77,19 +41,28 @@ In 2 sentences, assess how well this candidate fits, citing specific evidence. I
     let explanation: string | null = null;
     try {
       explanation = await generateWithRetry(prompt);
-    } catch {
-      explanation = null;
+    } catch (err) {
+      logger.warn({ resumeId: candidate.resumeId, err: (err as Error).message }, 'explanation failed');
     }
 
-    results.push({
+    return {
       resumeId: candidate.resumeId,
       score: Number(candidate.score.toFixed(3)),
       explanation,
       explanationAvailable: explanation !== null,
       requirementMatches: candidate.matches
-    });
+    };
+  };
+
+  // Run explanations in small batches so we stay under the free-tier rate limit
+  const top = ranked.slice(0, TOP_N);
+  const results = [];
+  for (let i = 0; i < top.length; i += EXPLAIN_CONCURRENCY) {
+    const batch = top.slice(i, i + EXPLAIN_CONCURRENCY);
+    results.push(...(await Promise.all(batch.map(explain))));
   }
 
+  logger.info({ event: 'matches_served', jobId, candidates: ranked.length, retrievalMs, totalMs: Date.now() - t0 });
   res.json(results);
 });
 
