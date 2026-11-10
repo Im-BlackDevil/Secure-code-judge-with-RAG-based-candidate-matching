@@ -8,7 +8,12 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "worker": "ts-node-dev --respawn --transpile-only src/workers/executionWorker.ts",
-    "resume-worker": "ts-node-dev --respawn --transpile-only src/workers/resumeWorker.ts"
+    "resume-worker": "ts-node-dev --respawn --transpile-only src/workers/resumeWorker.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/ranking.test.ts",
+    "test:sandbox": "vitest run tests/sandbox.test.ts",
+    "loadtest": "ts-node --transpile-only scripts/loadTest.ts",
+    "eval": "ts-node --transpile-only scripts/evalMatching.ts"
   },
   "keywords": [],
   "author": "",
@@ -42,6 +47,7 @@
     "@types/node": "^26.5.0",
     "@types/pg": "^8.23.1",
     "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^6.0.3",
     "vitest": "^5.0.4"
