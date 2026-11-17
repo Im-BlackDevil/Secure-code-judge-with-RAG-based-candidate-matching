@@ -6,6 +6,7 @@
 - Node v24.0.1, TypeScript 6.0.3 (pinned; TS 7 breaks ts-node), ts-node-dev 2.0.0
 - Postgres: Supabase free tier via session pooler; Redis: `redis:latest` in Docker
 - LLM: `gemini-3.5-flash`; embeddings: `gemini-embedding-2` (768 dims)
+- Test runner: Vitest 5.0.4
 
 ## Findings: bugs found by testing
 
@@ -48,3 +49,11 @@
 - **Observed:** resume 11 scored 0.926, but the generated explanation says its evidence "consists solely of listed skills without accompanying project descriptions" and recommends further screening.
 - **Cause:** an exact string such as "Node.js" matches itself at similarity 1.0 whether it appears in a skills list or in a real project, so skills-only resumes score high.
 - **Plan:** the Step 18 experiment (down-weight bare skill-list matches versus project/experience evidence). This is the "before" case.
+
+
+
+## Tests: tests executed to check if system if secure and protected
+
+### F1. Verified the test fails when the denominator is changed to matches.length, then restored.
+- **Regression test:** `tests/ranking.test.ts` (`npm run test:unit`): 3 of 3 passed, ~300 ms, on <17th November, 2026>. It covers: full coverage ranks above a tie on one generic skill, a missing requirement is penalised, and ties break deterministically.
+- **Scope of this test:** it exercises only the pure aggregation and sorting function (`rankCandidates`) with hand-built inputs (the 0.71 / 0.35 / 0.80 similarities come from the real resume 9 vs 10 case). It does not exercise the SQL retrieval, which is where the original bug lived. The end-to-end check is re-running `GET /matches/<jobId>` on the 9-vs-10 pair and the Part C evaluation.
