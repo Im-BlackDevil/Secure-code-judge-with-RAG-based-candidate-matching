@@ -50,10 +50,44 @@
 - **Cause:** an exact string such as "Node.js" matches itself at similarity 1.0 whether it appears in a skills list or in a real project, so skills-only resumes score high.
 - **Plan:** the Step 18 experiment (down-weight bare skill-list matches versus project/experience evidence). This is the "before" case.
 
+### F8. Redis outage hung the API instead of returning 503
+- **Observed:** with Redis stopped, `POST /submissions` never returned (client spinner indefinitely), and the new row stayed `pending`.
+- **Cause:** the API shared the worker connection (`maxRetriesPerRequest: null`), so `queue.add()` waited forever for Redis instead of throwing. My `try/catch` and `503` handler could never run.
+- **Fix:** separate connections. Workers retry forever. The API uses `enableOfflineQueue: false` and `maxRetriesPerRequest: 1`, so the enqueue fails immediately.
+- **Result after fix:** 
+| Redis down | 503, row marked System Error | 503 in 1.00 s | <recovery time after restart 1.29s> |
+| Docker Desktop stopped | Not a separate case here: Redis runs in Docker, so this is identical to the Redis outage | Same 503 | n/a |
+| Sandbox fails (nonexistent image, Redis up) | 3 attempts with 2.134 s / 4.197 s backoff, then System Error | 202 in 0.79 s | 6.331 s |
+- **Known limitation:** if the API *starts* while Redis is down, the first enqueue waits until Redis is available. This is a deploy-order issue.
 
+## Successfull Tests: tests executed to check if system is secure and protected
 
-## Tests: tests executed to check if system if secure and protected
-
-### F1. Verified the test fails when the denominator is changed to matches.length, then restored.
+### Ranking Regression Test (`npm run test:unit`)
 - **Regression test:** `tests/ranking.test.ts` (`npm run test:unit`): 3 of 3 passed, ~300 ms, on <17th November, 2026>. It covers: full coverage ranks above a tie on one generic skill, a missing requirement is penalised, and ties break deterministically.
 - **Scope of this test:** it exercises only the pure aggregation and sorting function (`rankCandidates`) with hand-built inputs (the 0.71 / 0.35 / 0.80 similarities come from the real resume 9 vs 10 case). It does not exercise the SQL retrieval, which is where the original bug lived. The end-to-end check is re-running `GET /matches/<jobId>` on the 9-vs-10 pair and the Part C evaluation.
+
+### Sandbox attack suite (`npm run test:sandbox`)
+Run on <18th November, 2026>: **10 of 10 passed** on the first run (12.68s total, Vitest 5.0.4). 
+Limits under test: 128 MB memory with no swap, 0.5 CPU, 50 PIDs, no network, read-only root filesystem and bind mount, all capabilities dropped, output capped at 10,000 chars.
+
+|           Test            |            Expected             |Result|  Time   |
+|    Normal program (sum)   |          ok, output `5`         | pass | 1193 ms |
+|       Multi-line output   |     `a\nb` (CRLF normalised)    | pass | 815 ms  |
+|       Crash (`1/0`)       | runtime_error, not wrong answer | pass | 337 ms  |
+| Infinite loop (2 s limit) |             timeout             | pass | 2558 ms |
+|         Memory bomb       |           memory_limit          | pass | 675 ms  |
+|    Fork bomb (3 s limit)  |    not `ok`; worker survives    | pass | 2764 ms |
+|       Network access      |           runtime_error         | pass | 886 ms  |
+|       Filesystem write    |           runtime_error         | pass | 493 ms  |
+|      Huge output (5 MB)   |        output ≤ 10,100 chars    | pass | 1125 ms |
+| No containers left behind |                0                | pass |  46 ms  |
+
+**Observations**
+- Container start-up plus teardown costs roughly 300–800 ms per run. This is wall-clock overhead, not program runtime.
+- The memory bomb died in 675 ms, long before any timeout, so the 128 MB cap does the work, not the timer.
+- The fork bomb finished in 2764 ms, under its 3000 ms limit, so it did not end by timeout. The verdict was either `runtime_error` (fork refused by the PID limit) or `memory_limit`. <Record which, see check 2 below.>
+- No test failed on the first run, so this run produced no new bug findings. The Phase 2 gaps this phase fixed (exit-code handling, CRLF, orphaned containers) were identified by reading the code, not by a failing test.
+
+**Verification that the tests can fail**
+- [Pass] Network: changed `NetworkMode` to `'bridge'`; the network test failed as expected. Restored.
+- [Pass] Filesystem: removed `ReadonlyRootfs: true`; the filesystem test failed as expected. Restored.

@@ -1,4 +1,4 @@
 import { Queue } from 'bullmq';
-import connection from './connection';
+import { producerConnection } from './connection';
 
-export const submissionQueue = new Queue('code-execution', { connection });
+export const submissionQueue = new Queue('code-execution', { connection: producerConnection });
