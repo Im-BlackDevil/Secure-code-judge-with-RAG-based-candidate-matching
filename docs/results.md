@@ -91,3 +91,7 @@ Limits under test: 128 MB memory with no swap, 0.5 CPU, 50 PIDs, no network, rea
 **Verification that the tests can fail**
 - [Pass] Network: changed `NetworkMode` to `'bridge'`; the network test failed as expected. Restored.
 - [Pass] Filesystem: removed `ReadonlyRootfs: true`; the filesystem test failed as expected. Restored.
+
+### Duplicate Enqueue Test
+- | Duplicate enqueue (same jobId twice) | second add ignored | both adds returned `submission-999999`; 1 job waiting; stored payload = first add | n/a |
+- Scope of the dedupe test: scratch queue (`dedupe-test`), script `scripts/dedupeTest.ts`. It verifies BullMQ's jobId idempotency. It does not prevent two separate user submissions of the same code (different rows, different ids); that would need a client idempotency key. Not built.
